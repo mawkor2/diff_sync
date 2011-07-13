@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>
+  Differential Synchronization Local to Remote test
+</title>
+    <script type="text/javascript" src="socket.io/socket.io.js"></script>
+    <script type="text/javascript" src="js/jquery.js"></script>
+    <script type="text/javascript" src="js/json2.js"></script>
+    <script type="text/javascript" src="js/diff_match_patch_uncompressed.js"></script>
+    <style>
+      body { font-family: verdana; background-color: #1b6b8c; color: #ffffff;}
+      #run_test { float: right;}
+      .fl { float: left; }
+      .cb { clear: both; }
+      .dv { background-image: url(images/dv.png); position: absolute; top: 0; right: 0; width: 97px; height: 81px;}
+      .explanation {position: absolute;
+left: 647px;
+top: 153px;}
+    </style>
+</head>
+<body>
+  <div class='dv'></div>
+  <h1>Differential Synchronization Test</h1>
+  <div class='fl cb'>
+    <div class='fl'>
+      <h2>Local Text</h2>
+      <textarea rows='5' cols='35' id='local_text'>Once we eliminate the Doctor, whatever remains, no matter how insignificant, must be the eliminated. ELIMINATE!</textarea>
+    </div>
+    <div class='fl'>
+      <h2>Local Shadow</h2>
+      <textarea rows='5' cols='35' id='local_shadow'>Once you eliminate the impossible, whatever remains, no matter how improbable, must be the truth.</textarea><br>
+      <button id='run_test'>Run Test</button>
+    </div>
+    <div class='explanation'>
+      <button id='continue'>EXPLAIN</button><br>
+      <span id='explanation'></span>
+    </div>
+  </div>
+  <div class='fl cb'>
+    <div class='fl'>
+      <h2>Remote Text</h2>
+      <textarea rows='5' cols='35' id='remote_text'>Once you discover the simplest solution, whatever remains, however improbable, is unlikely the truth.</textarea>
+    </div>
+    <div class='fl'>
+      <h2>Remote Shadow</h2>
+      <textarea rows='5' cols='35' id='remote_shadow'>Once you eliminate the impossible, whatever remains, no matter how improbable, must be the truth.</textarea><br>
+    </div>
+  </div>
+  <div class='fl cb'>
+    <div class='fl'>
+      <h2>Local Text Final</h2>
+      <textarea rows='5' cols='35' id='local_text_final'></textarea>
+    </div>
+    <div class='fl'>
+      <h2>Local Shadow Final</h2>
+      <textarea rows='5' cols='35' id='local_shadow_final'></textarea><br>
+    </div>
+  </div>
+  <div id='patch_text' class='fl cb'></div>
+  <script type='text/javascript'>
+    if(!Object.create){
+      Object.create = function(o){
+        function C(){};
+        C.prototype = o;
+        return new C();
+      };
+    };
+    var diff_sync = function(patchUpstreamOnRecv, serverOverridePreferred) {
+      var _text = '';
+      var _shadow = '';
+      var patchUpstreamOnRecv = (typeof patchUpstreamOnRecv !== 'boolean') ? false : patchUpstreamOnRecv;  
+      var serverOverridePreferred = (typeof serverOverridePreferred !== 'boolean') ? true : serverOverridePreferred;
+      
+      // TODO: make these public to allow override            
+
+      var setLocalText = function(value) {
+        _text = value;
+        document.getElementById('local_text').value = value;
+      };
+      var setLocalShadow = function(value) {
+        _shadow = value;
+        document.getElementById('local_shadow').value = value;
+      };
+
+      // TODO: implement cross-browser WebWorker js obj with fallback
+
+      return {
+        getLocalText : function() {
+          _text = document.getElementById('local_text').value;
+          return _text;
+        },
+        getLocalShadow : function() {
+          _shadow = document.getElementById('local_shadow').value;
+          return _shadow;
+        },
+        dmp : new diff_match_patch(),
+        patchUpstreamOnRecv: patchUpstreamOnRecv,
+        serverOverridePreferred: serverOverridePreferred,
+        init: function() {
+          _text = this.getLocalText();
+          _shadow = this.getLocalShadow();
+        },
+        computeDiff: function(textOld, textNew, flags) {
+          var diffs = this.dmp.diff_main(textOld, textNew, true);
+          // TODO: consider allowing flags for diff options 
+          this.dmp.diff_cleanupSemantic(diffs);
+          return diffs;
+        },
+        patchLocalShadow: function(patches) {
+          var oPatch = this.dmp.patch_apply(patches, getLocalShadow());
+          _shadow = oPatch[0]; 
+          for (var i=0;i<oPatch[1].length;i++) {
+            /* if (!oPatch[1][i]) {
+              TODO: handle patch failures 
+            } */
+          };
+          return oPatch;
+        },
+        patchLocalText: function(patches) {
+          var oPatch = this.dmp.patch_apply(patches, getLocalText());
+          _text = oPatch[0]; 
+          for (var i=0;i<oPatch[1].length;i++) {
+            /* if (!oPatch[1][i]) {
+              TODO: handle patch failures 
+            } */          
+          };
+          return oPatch;
+        },
+        send: function(data) {
+          console.log('send');
+          var text1 = this.getLocalShadow();
+          var text2 = this.getLocalText();
+          var diffs = this.computeDiff(text1, text2);
+          if (diffs.length > 0) {
+            var patches = this.dmp.patch_make(text1, diffs);
+            setLocalShadow(this.getLocalText());
+            var oData = Object.create(data, {'patches' : { value: patches, enumerable: false }});
+            this.io.send(oData);
+          };
+        },
+        recv: function(data) {
+          if (typeof data.full_transmission !== 'undefined') {
+            // in case of failure, allow for full client reset of the content to the server version
+            setLocalText(data.full_transmission);
+            setLocalShadow(data.full_transmission);
+          }
+          else {
+            this.patchLocalText(data.patches);
+            this.patchLocalShadow(data.patches);
+            console.log(this.patchUpstreamOnRecv);
+            if (this.patchUpstreamOnRecv) {
+              this.send({});
+            };
+          };
+        },
+        io: {
+          recv: function(data) {
+            console.log('net:recv[' + data + ']'); 
+            diff_sync.recv(data);
+          },
+          send: function(data) {
+            var payload = {'patches' : data.patches };
+            console.log('net:send[' + JSON.stringify(payload) + ']');
+            // TODO: implement conflict resolution logic
+            socket.emit('diff sync', payload);
+            //socket.emit('diff sync', data);
+          }
+        }
+      };
+    }();
+
+    jQuery(document).ready(function() {
+      diff_sync.init();
+      jQuery('#run_test').bind('click', function() {
+        diff_sync.send({});
+      });
+    });
+    var halted = false;
+    var explanationIdx = 0;
+    jQuery('#continue').bind('click', function(){
+      continueExp();
+    });
+    function continueExp() {
+      promptExplanation(explanations[explanationIdx]);      
+      explanationIdx++;
+      if (explanationIdx === explanations.length) {
+        jQuery('#continue').attr('disabled', true);
+      }
+    };
+    function promptExplanation(explanation) {
+      document.getElementById('explanation').innerHTML = explanation;
+    };
+    var explanations = ['First compute the diff of Local Text and Remote Text to obtain a patch'
+      ,'Then copy the Local Text to Local Shadow'
+      ,'Patch Remote Text'
+      ,'Patch Remote Shadow. Local to Remote has completed a cycle'
+      ,'Compute the diff of Remote Text and Remote Shadow to obtain a patch'
+      ,'Set Remote Shadow to Remote Text'
+      ,'Patch Local Text'
+      ,'Patch Local Shadow. Now everything is in sync, and is a composite of the changes from Local and Remote.'
+    ];
+
+    //Local Socket Methods
+    var socket = io.connect();
+    socket.on('diff sync', function(data) {
+      console.log(data);
+      diff_sync.io.recv(data);
+    });
+  
+    socket.on('log', function(data) { 
+      console.log(data);
+    });  
+
+    // for test override default patch method
+    diff_sync.patchLocalText = function(patches) {
+      var oPatch = this.dmp.patch_apply(patches, this.getLocalText());
+      document.getElementById('local_text_final').value = oPatch[0]; 
+      for (var i=0;i<oPatch[1].length;i++) {
+        /* if (!oPatch[1][i]) {
+          TODO: handle patch failures 
+        } */           
+      };
+      return oPatch;
+    };
+
+    diff_sync.patchLocalShadow = function(patches) {
+      var oPatch = this.dmp.patch_apply(patches, this.getLocalShadow());
+      document.getElementById('local_shadow_final').value = oPatch[0]; 
+      var flagCleanupSemantic = false;
+      for (var i=0;i<oPatch[1].length;i++) {
+        /* if (!oPatch[1][i]) {
+          TODO: handle patch failures 
+        } */ 
+      };
+      return oPatch;
+    }
+      
+  </script>
+</body>
+</html>
+

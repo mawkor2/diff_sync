@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>
+  Differential Synchronization client to server test
+</title>
+    <!-- must be running from server <script type="text/javascript" src="js/socket.io/socket.io.js"></script> --> 
+    <script type="text/javascript" src="js/jquery.js"></script>
+    <script type="text/javascript" src="js/prettify.js"></script>
+    <script type="text/javascript" src="js/jquery.timers.js"></script>
+    <script type="text/javascript" src="js/jquery.color.js"></script>
+    <script type="text/javascript" src="js/diff_match_patch_uncompressed.js"></script>
+    <style>
+      body { font-family: verdana; background-color: #1b6b8c; color: #ffffff;}
+      #run_test { float: right;}
+      .fl { float: left; }
+      .cb { clear: both; }
+      .dv { background-image: url(images/dv.png); position: absolute; top: 0; right: 0; width: 97px; height: 81px;}
+      .explanation {position: absolute;
+left: 647px;
+top: 153px;}
+    </style>
+</head>
+<body>
+  <div class='dv'></div>
+  <h1>Differential Synchronization Test</h1>
+  <div class='fl cb'>
+    <div class='fl'>
+      <h2>Client Text</h2>
+      <textarea rows='5' cols='35' id='client_text'>Once we eliminate the Doctor, whatever remains, no matter how insignificant, must be the eliminated. ELIMINATE!</textarea>
+    </div>
+    <div class='fl'>
+      <h2>Client Shadow</h2>
+      <textarea rows='5' cols='35' id='client_shadow'>Once you eliminate the impossible, whatever remains, no matter how improbable, must be the truth.</textarea><br>
+      <button id='run_test'>Run Test</button>
+    </div>
+    <div class='explanation'>
+      <button id='continue'>EXPLAIN</button><br>
+      <span id='explanation'></span>
+    </div>
+  </div>
+  <div class='fl cb'>
+    <div class='fl'>
+      <h2>Server Text</h2>
+      <textarea rows='5' cols='35' id='server_text'>Once you discover the simplest solution, whatever remains, however improbable, is unlikely the truth.</textarea>
+    </div>
+    <div class='fl'>
+      <h2>Server Shadow</h2>
+      <textarea rows='5' cols='35' id='server_shadow'>Once you eliminate the impossible, whatever remains, no matter how improbable, must be the truth.</textarea><br>
+    </div>
+  </div>
+  <div class='fl cb'>
+    <div class='fl'>
+      <h2>Client Text Final</h2>
+      <textarea rows='5' cols='35' id='client_text_final'></textarea>
+    </div>
+    <div class='fl'>
+      <h2>Client Shadow Final</h2>
+      <textarea rows='5' cols='35' id='client_shadow_final'></textarea><br>
+    </div>
+  </div>
+  <div id='patch_text' class='fl cb'></div>
+  <script type='text/javascript'>
+    var diff_sync = function() {
+      var _text = '';
+      var _shadow = '';
+      
+      var getClientText = function() {
+        _text = document.getElementById('client_text').value;
+        return _text;
+      };
+      var getClientShadow = function() {
+        _shadow = document.getElementById('client_shadow').value;
+        return _shadow;
+      };
+      var setClientText = function(value) {
+        document.getElementById('client_text').value = value;
+      };
+      var setClientShadow = function(value) {
+        document.getElementById('client_shadow').value = value;
+      };
+
+      var getServerText = function() {
+        _text = document.getElementById('server_text').value;
+        return _text;
+      };
+      var getServerShadow = function() {
+        _shadow = document.getElementById('server_shadow').value;
+        return _shadow;
+      };
+      var setServerText = function(value) {
+        document.getElementById('server_text').value = value;
+      };
+      var setServerShadow = function(value) {
+        document.getElementById('server_shadow').value = value;
+      };
+      var dmp = null;
+
+      return {
+        init: function() {
+          _text = getClientText();
+          _shadow = getClientShadow();
+        },
+        computeDiff: function(textOld, textNew) {
+          dmp = new diff_match_patch();
+          var diffs = dmp.diff_main(textOld, textNew, true); 
+          dmp.diff_cleanupSemantic(diffs);
+          return diffs;
+        },
+        getPatches: function(diffs) {
+          var patches = dmp.patch_make(diffs);
+          return patches; 
+        },
+        patchText: function(patches, text1) {
+          var oPatch = dmp.patch_apply(patches, text1);
+          return oPatch;
+        },
+        patchServerShadow: function(patches) {
+          var oPatch = dmp.patch_apply(patches, getServerShadow());
+          document.getElementById('server_shadow').value = oPatch[0]; 
+          for (var i=0;i<oPatch[1].length;i++) {
+            if (!oPatch[1][i]) {
+              //alert('conflict!');
+            }
+          };
+          return oPatch;
+        },
+        patchServerText: function(patches) {
+          var oPatch = dmp.patch_apply(patches, getServerText());
+          document.getElementById('server_text').value = oPatch[0]; 
+          for (var i=0;i<oPatch[1].length;i++) {
+            if (!oPatch[1][i]) {
+              //alert('conflict!');
+            }            
+          };
+          return oPatch;
+        },
+        patchClientShadow: function(patches) {
+          var oPatch = dmp.patch_apply(patches, getClientShadow());
+          document.getElementById('client_shadow_final').value = oPatch[0]; 
+          var flagCleanupSemantic = false;
+          for (var i=0;i<oPatch[1].length;i++) {
+            if (!oPatch[1][i]) {
+              //alert('conflict!');
+            }
+          };
+          return oPatch;
+        },
+        patchClientText: function(patches) {
+          var oPatch = dmp.patch_apply(patches, getClientText());
+          document.getElementById('client_text_final').value = oPatch[0]; 
+          for (var i=0;i<oPatch[1].length;i++) {
+            
+          };
+          return oPatch;
+        },
+        diffSync: function() {
+          // client
+          var diffs = this.computeDiff(getClientShadow(), getClientText());
+          // if differences...
+          var patches = dmp.patch_make(diffs);
+          setClientShadow(getClientText());
+          // send patches to server
+          // server
+          this.patchServerShadow(patches);
+          this.patchServerText(patches);
+          diffs = this.computeDiff(getServerShadow(), getServerText());
+          // if differences
+          patches = dmp.patch_make(diffs);
+          setServerShadow(getServerText());
+          // send patches to client
+          // client
+          this.patchClientText(patches);
+          this.patchClientShadow(patches);
+          // etc
+        }
+      };
+    }();
+
+    $(document).ready(function() {
+    diff_sync.init();
+      $('#run_test').bind('click', function() {
+        diff_sync.diffSync();
+      });
+    });
+    var halted = false;
+    var explanationIdx = 0;
+    $('#continue').bind('click', function(){
+      continueExp();
+    });
+    function continueExp() {
+      promptExplanation(explanations[explanationIdx]);      
+      explanationIdx++;
+      if (explanationIdx === explanations.length) {
+        $('#continue').attr('disabled', true);
+      }
+    };
+    function promptExplanation(explanation) {
+      document.getElementById('explanation').innerHTML = explanation;
+    };
+    var explanations = ['First compute the diff of Client Text and Server Text to obtain a patch'
+      ,'Then copy the Client Text to Client Shadow'
+      ,'Patch Server Text'
+      ,'Patch Server Shadow. Client to server has completed a cycle'
+      ,'Compute the diff of Server Text and Server Shadow to obtain a patch'
+      ,'Set Server Shadow to Server Text'
+      ,'Patch Client Text'
+      ,'Patch Client Shadow. Now everything is in sync, and is a composite of the changes from client and server.'
+    ];      
+  </script>
+</body>
+</html>
+
